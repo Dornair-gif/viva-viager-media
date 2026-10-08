@@ -44,7 +44,8 @@ video{width:100%;max-width:360px;border-radius:8px;background:#000;display:block
 <main>
 <section><h2>Bibliothèque de clips</h2>
 <p class="mut">Déposez ici les footages (mp4, mov, m4v, webm). Les clips s'enchaînent dans l'ordre de votre sélection, recadrés en vertical.</p>
-<input id="up" type="file" accept="video/*" multiple><div id="upinfo" class="mut"></div>
+<input id="up" type="file" accept="video/*" multiple>
+<label style="display:inline-block;margin-left:10px"><input id="spl" type="checkbox" checked style="width:auto"> Découper automatiquement en plans (pour les longues vidéos de footage)</label><div id="upinfo" class="mut"></div>
 <div id="clips" class="grid" style="margin-top:12px"></div></section>
 
 <section><h2>Reels</h2><div id="list"></div><button id="new" class="ghost">Nouveau reel</button></section>
@@ -132,10 +133,21 @@ $('#apr').onclick=e=>busy(e.target,'Validation…',async()=>{cur=await (await ap
 $('#up').onchange=async e=>{
   const fs=[...e.target.files];let n=0;
   for(const f of fs){
-    $('#upinfo').textContent='Envoi '+(++n)+'/'+fs.length+' : '+f.name;
-    try{await api('/clips/'+encodeURIComponent(f.name),{method:'PUT',body:f})}catch(x){say(x.message,true)}
+    $('#upinfo').textContent='Envoi '+(++n)+'/'+fs.length+' : '+f.name+($('#spl').checked?' (découpage en plans, comptez 2 à 4 minutes pour une longue vidéo)':'');
+    try{await api('/clips/'+encodeURIComponent(f.name)+($('#spl').checked?'?split=1':''),{method:'PUT',body:f})}catch(x){say(x.message,true)}
   }
-  $('#upinfo').textContent='';e.target.value='';try{await load()}catch(x){say(x.message,true)}
+  e.target.value='';
+  try{
+    for(;;){
+      const j=await (await api('/jobs')).json();const run=Object.entries(j).filter(([,v])=>v.state==='en cours');
+      const bad=Object.entries(j).filter(([,v])=>v.state==='erreur');
+      if(bad.length)say('Découpage en erreur : '+bad[0][1].error,true);
+      if(!run.length)break;
+      $('#upinfo').textContent='Découpage en plans en cours pour '+run.map(([k])=>k).join(', ')+' (2 à 5 minutes, vous pouvez attendre ici)';
+      await load();await new Promise(r=>setTimeout(r,6000));
+    }
+  }catch(x){say(x.message,true)}
+  $('#upinfo').textContent='';try{await load()}catch(x){say(x.message,true)}
 };
 if(T)load().catch(e=>say(e.message,true));
 </script>

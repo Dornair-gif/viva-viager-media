@@ -46,6 +46,7 @@ function safeClipName(s) {
   const base = path.basename(String(s || '')).replace(/[^A-Za-z0-9._-]/g, '_');
   return /\.(mp4|mov|m4v|webm)$/i.test(base) && base.length < 120 ? base : null;
 }
+const jobs = {};
 let chain = Promise.resolve();
 const serial = (fn) => { const p = chain.then(() => fn()); chain = p.catch(() => {}); return p; };
 
@@ -260,6 +261,35 @@ async function render(m) {
   return m;
 }
 
+
+// Découpe une longue vidéo en plans (détection de changements de scène). Les plans de moins de 1,5 s sont fusionnés.
+async function splitShots(srcName) {
+  const src = path.join(CLIPS, srcName);
+  const total = await probeDur(src);
+  const log = await new Promise((resolve, reject) => {
+    const p = spawn('ffmpeg', ['-hide_banner', '-i', src, '-vf', "select='gt(scene,0.35)',showinfo", '-an', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = ''; p.stderr.on('data', (d) => { err += d; });
+    p.on('error', reject); p.on('close', () => resolve(err));
+  });
+  const cuts = [...log.matchAll(/pts_time:([0-9.]+)/g)].map((x) => parseFloat(x[1])).filter((t) => t > 0 && t < total);
+  const bounds = [0];
+  for (const t of cuts) if (t - bounds[bounds.length - 1] >= 1.5) bounds.push(t);
+  if (total - bounds[bounds.length - 1] < 1.5 && bounds.length > 1) bounds.pop();
+  bounds.push(total);
+  const base = srcName.replace(/\.[^.]+$/, '').slice(0, 60);
+  const out = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const name = `${base}_s${String(i + 1).padStart(2, '0')}.mp4`;
+    const dest = path.join(CLIPS, name);
+    await ff(['-ss', bounds[i].toFixed(3), '-to', bounds[i + 1].toFixed(3), '-i', src, '-an',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', dest]);
+    const mid = Math.max(0, (bounds[i + 1] - bounds[i]) / 2 - 0.1);
+    await ff(['-ss', mid.toFixed(2), '-i', dest, '-frames:v', '1', '-vf', 'scale=270:-1', path.join(THUMBS, name + '.jpg')]).catch(() => {});
+    out.push({ name, start: Math.round(bounds[i] * 10) / 10, end: Math.round(bounds[i + 1] * 10) / 10 });
+  }
+  return out;
+}
+
 // ---------- HTTP ----------
 function sendFile(req, res, file, type) {
   if (!fs.existsSync(file)) return json(res, 404, { error: 'fichier absent' });
@@ -291,6 +321,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/status') {
       return json(res, 200, { elevenlabsKey: !!EL_KEY, defaultVoice: EL_VOICE || null });
     }
+    if (req.method === 'GET' && p === '/api/jobs') return json(res, 200, jobs);
     if (req.method === 'GET' && p === '/api/voices') return json(res, 200, await listVoices());
 
     if (req.method === 'GET' && p === '/api/clips') {
@@ -308,6 +339,13 @@ const server = http.createServer(async (req, res) => {
       await fsp.rename(dest + '.part', dest);
       try { await ff(['-ss', '1', '-i', dest, '-frames:v', '1', '-vf', 'scale=270:-1', path.join(THUMBS, name + '.jpg')]); }
       catch { await ff(['-i', dest, '-frames:v', '1', '-vf', 'scale=270:-1', path.join(THUMBS, name + '.jpg')]).catch(() => {}); }
+      if (url.searchParams.get('split') === '1') {
+        jobs[name] = { state: 'en cours', startedAt: new Date().toISOString() };
+        serial(() => splitShots(name))
+          .then((shots) => { jobs[name] = { state: 'termine', shots: shots.length, endedAt: new Date().toISOString() }; })
+          .catch((e) => { jobs[name] = { state: 'erreur', error: String(e.message || e).slice(0, 300) }; });
+        return json(res, 202, { ok: true, name, splitting: true });
+      }
       return json(res, 200, { ok: true, name });
     }
     if ((mt = /^\/api\/thumbs\/([^/]+)$/.exec(p)) && req.method === 'GET') {
