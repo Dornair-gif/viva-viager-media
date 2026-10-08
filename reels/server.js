@@ -171,6 +171,26 @@ async function textLines(tmp, lines, o) {
   }
   return parts;
 }
+
+// Reel déjà monté (ex. export Claude Design muet) : on ajoute seulement la voix, sans texte ni carton.
+async function renderVoiceOnly(m, clipName, voice, dA) {
+  const dir = reelDir(m.id);
+  const src = path.join(CLIPS, clipName);
+  const dV = await probeDur(src);
+  const total = Math.max(dV, dA + 0.4);
+  const final = path.join(dir, 'final.mp4');
+  const vf = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p` +
+    (total > dV + 0.05 ? `,tpad=stop_mode=clone:stop_duration=${(total - dV).toFixed(3)}` : '');
+  await ff(['-i', src, '-i', voice, '-map', '0:v', '-map', '1:a', '-vf', vf,
+    '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11,apad,aresample=44100', '-ac', '2', '-t', total.toFixed(3),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', final]);
+  m.status = 'monte';
+  m.duration = Math.round((await probeDur(final)) * 10) / 10;
+  m.renderedAt = new Date().toISOString();
+  await writeMeta(m);
+  return m;
+}
 async function render(m) {
   const dir = reelDir(m.id);
   const voice = path.join(dir, 'voice.mp3');
@@ -180,6 +200,7 @@ async function render(m) {
   if (!clips.length) throw new Error('Choisissez au moins un clip');
   for (const c of clips) if (!fs.existsSync(path.join(CLIPS, c))) throw new Error('Clip introuvable : ' + c);
   const dur = await probeDur(voice);
+  if (m.mode === 'voix-seule') return renderVoiceOnly(m, clips[0], voice, dur);
   const bodyLen = dur + 0.5;
   const per = bodyLen / clips.length;
   const tmp = path.join(dir, 'tmp');
@@ -309,6 +330,7 @@ const server = http.createServer(async (req, res) => {
         text: String(b.text ?? old.text ?? '').slice(0, 1500),
         cta: String(b.cta ?? old.cta ?? 'Rendez-vous gratuit').slice(0, 60),
         date: String(b.date ?? old.date ?? '').slice(0, 10),
+        mode: (b.mode ?? old.mode) === 'voix-seule' ? 'voix-seule' : 'complet',
         voiceId: String(b.voiceId ?? old.voiceId ?? '').slice(0, 64),
         clips: Array.isArray(b.clips) ? b.clips.map(safeClipName).filter(Boolean).slice(0, 12) : (old.clips || []) };
       if (old.status !== 'brouillon' && (m.text !== old.text || m.voiceId !== old.voiceId)) m.status = 'brouillon';

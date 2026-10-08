@@ -52,6 +52,7 @@ video{width:100%;max-width:360px;border-radius:8px;background:#000;display:block
 <section id="ed" style="display:none"><h2 id="edt">Reel</h2>
 <div class="row"><div><label>Identifiant (minuscules, chiffres, tirets)</label><input id="id"></div>
 <div><label>Date de publication prévue</label><input id="date" type="date"></div></div>
+<label>Mode</label><select id="mode"><option value="complet">Reel complet : footage, accroche, sous-titres, carton de fin</option><option value="voix-seule">Voix seule sur un reel déjà monté (choisir un seul clip)</option></select>
 <label>Texte à l'écran (accroche, 3 premières secondes)</label><input id="hook" maxlength="120">
 <label>Texte lu par la voix</label><textarea id="text"></textarea>
 <div class="row"><div><label>Voix ElevenLabs</label><select id="voice"><option value="">(voix par défaut du service)</option></select>
@@ -105,7 +106,7 @@ function drawList(){
 function open(r){
   cur=r;chosen=[...(r.clips||[])];$('#ed').style.display='block';$('#edt').textContent='Reel '+r.id;
   $('#id').value=r.id;$('#id').disabled=true;$('#date').value=r.date||'';$('#hook').value=r.hook||'';
-  $('#text').value=r.text||'';$('#cta').value=r.cta||'Rendez-vous gratuit';$('#voice').value=r.voiceId||'';
+  $('#text').value=r.text||'';$('#cta').value=r.cta||'Rendez-vous gratuit';$('#voice').value=r.voiceId||'';$('#mode').value=r.mode||'complet';
   drawClips();drawChosen();drawList();media();
 }
 async function media(){
@@ -115,13 +116,13 @@ async function media(){
   if(['monte','valide'].includes(cur.status)){try{const r=await api('/reels/'+cur.id+'/video');$('#vid').src=URL.createObjectURL(await r.blob());$('#vid').style.display='block'}catch{}}
 }
 $('#new').onclick=()=>{cur=null;chosen=[];$('#ed').style.display='block';$('#edt').textContent='Nouveau reel';
-  for(const k of ['id','date','hook','text'])$('#'+k).value='';$('#id').disabled=false;$('#cta').value='Rendez-vous gratuit';drawClips();drawChosen();media()};
+  for(const k of ['id','date','hook','text'])$('#'+k).value='';$('#id').disabled=false;$('#cta').value='Rendez-vous gratuit';$('#mode').value='complet';drawClips();drawChosen();media()};
 $('#lv').onclick=e=>busy(e.target,'Chargement des voix…',async()=>{
   const v=await (await api('/voices')).json();const s=$('#voice');const keep=s.value;
   s.innerHTML='<option value="">(voix par défaut du service)</option>'+v.map(x=>'<option value="'+x.id+'">'+x.name.replace(/</g,'')+(x.labels.language?' ('+x.labels.language+')':'')+'</option>').join('');s.value=keep});
 async function save(){
   const id=$('#id').value.trim();
-  const r=await api('/reels/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify({hook:$('#hook').value,text:$('#text').value,cta:$('#cta').value,date:$('#date').value,voiceId:$('#voice').value,clips:chosen})});
+  const r=await api('/reels/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify({hook:$('#hook').value,text:$('#text').value,cta:$('#cta').value,date:$('#date').value,mode:$('#mode').value,voiceId:$('#voice').value,clips:chosen})});
   cur=await r.json();$('#id').disabled=true;reels=await (await api('/reels')).json();drawList();$('#edt').textContent='Reel '+cur.id;return cur;
 }
 $('#save').onclick=e=>busy(e.target,'Enregistrement…',save);
