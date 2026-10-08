@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Studio reels VIVA VIAGER</title>
+<style>
+:root{--navy:#1D3746;--red:#F13F14;--bg:#F4F6F8;--txt:#1b2a33;--mut:#6B7280}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--txt)}
+header{background:var(--navy);color:#fff;padding:14px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+main{max-width:980px;margin:0 auto;padding:16px}
+section{background:#fff;border-radius:10px;padding:16px;margin-bottom:16px}
+h2{margin:0 0 10px;font-size:17px;color:var(--navy)}
+input,textarea,select,button{font:inherit}
+input,textarea,select{width:100%;padding:8px;border:1px solid #cfd6dc;border-radius:6px;background:#fff}
+textarea{min-height:150px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+button{background:var(--navy);color:#fff;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;margin:6px 6px 0 0}
+button.red{background:var(--red)}button.ghost{background:#e6ebef;color:var(--navy)}
+button:disabled{opacity:.5;cursor:wait}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.clip{border:3px solid transparent;border-radius:8px;overflow:hidden;background:#000;cursor:pointer;position:relative}
+.clip img{display:block;width:100%;aspect-ratio:9/16;object-fit:cover}
+.clip.sel{border-color:var(--red)}
+.clip b{position:absolute;top:4px;left:4px;background:var(--red);color:#fff;border-radius:50%;width:22px;height:22px;text-align:center;font-size:13px;line-height:22px}
+.clip small{position:absolute;bottom:0;left:0;right:0;background:#000a;color:#fff;font-size:11px;padding:2px 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>div{flex:1;min-width:200px}
+.reel{padding:8px 10px;border:1px solid #dde3e8;border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+.reel.on{border-color:var(--red)}
+.tag{font-size:12px;border-radius:99px;padding:2px 9px;background:#e6ebef}
+.tag.valide{background:#d6f3df}.tag.monte{background:#fde6c8}.tag.voix{background:#dbe7fb}
+#msg{position:sticky;top:0;z-index:5;background:#fff3cd;padding:8px 14px;display:none}
+video{width:100%;max-width:360px;border-radius:8px;background:#000;display:block}
+.mut{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<header><h1>Studio reels VIVA VIAGER</h1>
+<input id="tok" type="password" placeholder="Jeton d'accès" style="max-width:240px"><button id="go" class="red">Entrer</button></header>
+<div id="msg"></div>
+<main>
+<section><h2>Bibliothèque de clips</h2>
+<p class="mut">Déposez ici les footages (mp4, mov, m4v, webm). Les clips s'enchaînent dans l'ordre de votre sélection, recadrés en vertical.</p>
+<input id="up" type="file" accept="video/*" multiple><div id="upinfo" class="mut"></div>
+<div id="clips" class="grid" style="margin-top:12px"></div></section>
+
+<section><h2>Reels</h2><div id="list"></div><button id="new" class="ghost">Nouveau reel</button></section>
+
+<section id="ed" style="display:none"><h2 id="edt">Reel</h2>
+<div class="row"><div><label>Identifiant (minuscules, chiffres, tirets)</label><input id="id"></div>
+<div><label>Date de publication prévue</label><input id="date" type="date"></div></div>
+<label>Texte à l'écran (accroche, 3 premières secondes)</label><input id="hook" maxlength="120">
+<label>Texte lu par la voix</label><textarea id="text"></textarea>
+<div class="row"><div><label>Voix ElevenLabs</label><select id="voice"><option value="">(voix par défaut du service)</option></select>
+<button id="lv" class="ghost">Charger les voix</button></div>
+<div><label>Phrase de fin</label><input id="cta" value="Rendez-vous gratuit"></div></div>
+<label>Clips choisis (dans l'ordre)</label><div id="chosen" class="mut">Aucun</div>
+<button id="save">Enregistrer</button><button id="mkv" class="ghost">1. Générer la voix</button>
+<button id="rnd" class="ghost">2. Monter la vidéo</button><button id="apr" class="red">3. Valider</button>
+<p class="mut">Valider ne publie rien. L'envoi vers Buffer se décide à part.</p>
+<audio id="aud" controls style="width:100%;max-width:360px;display:none"></audio>
+<video id="vid" controls playsinline style="display:none;margin-top:10px"></video>
+</section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+let T=sessionStorage.getItem('tok')||'',clips=[],reels=[],cur=null,chosen=[];
+$('#tok').value=T;
+function say(t,bad){const m=$('#msg');m.textContent=t;m.style.display=t?'block':'none';m.style.background=bad?'#f8d7da':'#fff3cd'}
+async function api(path,opt={}){
+  const r=await fetch('/api'+path,{...opt,headers:{'x-token':T,...(opt.headers||{})}});
+  if(!r.ok){let e='Erreur '+r.status;try{e=(await r.json()).error||e}catch{}throw new Error(e)}
+  return r;
+}
+async function busy(btn,txt,fn){btn.disabled=true;say(txt);try{await fn();say('')}catch(e){say(e.message,true)}btn.disabled=false}
+$('#go').onclick=async()=>{T=$('#tok').value.trim();sessionStorage.setItem('tok',T);try{await load();say('')}catch(e){say(e.message,true)}};
+async function load(){
+  clips=await (await api('/clips')).json();reels=await (await api('/reels')).json();drawClips();drawList();
+}
+async function thumb(name){try{const r=await api('/thumbs/'+encodeURIComponent(name));return URL.createObjectURL(await r.blob())}catch{return ''}}
+async function drawClips(){
+  const g=$('#clips');g.innerHTML='';
+  for(const c of clips){
+    const d=document.createElement('div');d.className='clip'+(chosen.includes(c.name)?' sel':'');
+    const i=chosen.indexOf(c.name);
+    d.innerHTML=(i>=0?'<b>'+(i+1)+'</b>':'')+'<img alt=""><small>'+c.name.replace(/</g,'')+'</small>';
+    d.onclick=()=>{chosen=chosen.includes(c.name)?chosen.filter(x=>x!==c.name):[...chosen,c.name];drawClips();drawChosen()};
+    g.appendChild(d);thumb(c.name).then(u=>{d.querySelector('img').src=u});
+  }
+}
+function drawChosen(){$('#chosen').textContent=chosen.length?chosen.map((c,i)=>(i+1)+'. '+c).join('  ·  '):'Aucun'}
+function drawList(){
+  const l=$('#list');l.innerHTML='';
+  for(const r of reels){
+    const d=document.createElement('div');d.className='reel'+(cur&&cur.id===r.id?' on':'');
+    d.innerHTML='<span><b>'+r.id+'</b> '+(r.date||'')+'<br><span class="mut"></span></span><span class="tag '+r.status+'">'+r.status+'</span>';
+    d.querySelector('.mut').textContent=r.hook||'';
+    d.onclick=()=>open(r);l.appendChild(d);
+  }
+  if(!reels.length)l.innerHTML='<p class="mut">Aucun reel pour le moment.</p>';
+}
+function open(r){
+  cur=r;chosen=[...(r.clips||[])];$('#ed').style.display='block';$('#edt').textContent='Reel '+r.id;
+  $('#id').value=r.id;$('#id').disabled=true;$('#date').value=r.date||'';$('#hook').value=r.hook||'';
+  $('#text').value=r.text||'';$('#cta').value=r.cta||'Rendez-vous gratuit';$('#voice').value=r.voiceId||'';
+  drawClips();drawChosen();drawList();media();
+}
+async function media(){
+  $('#vid').style.display=$('#aud').style.display='none';
+  if(!cur)return;
+  if(['voix','monte','valide'].includes(cur.status)){try{const r=await api('/reels/'+cur.id+'/audio');$('#aud').src=URL.createObjectURL(await r.blob());$('#aud').style.display='block'}catch{}}
+  if(['monte','valide'].includes(cur.status)){try{const r=await api('/reels/'+cur.id+'/video');$('#vid').src=URL.createObjectURL(await r.blob());$('#vid').style.display='block'}catch{}}
+}
+$('#new').onclick=()=>{cur=null;chosen=[];$('#ed').style.display='block';$('#edt').textContent='Nouveau reel';
+  for(const k of ['id','date','hook','text'])$('#'+k).value='';$('#id').disabled=false;$('#cta').value='Rendez-vous gratuit';drawClips();drawChosen();media()};
+$('#lv').onclick=e=>busy(e.target,'Chargement des voix…',async()=>{
+  const v=await (await api('/voices')).json();const s=$('#voice');const keep=s.value;
+  s.innerHTML='<option value="">(voix par défaut du service)</option>'+v.map(x=>'<option value="'+x.id+'">'+x.name.replace(/</g,'')+(x.labels.language?' ('+x.labels.language+')':'')+'</option>').join('');s.value=keep});
+async function save(){
+  const id=$('#id').value.trim();
+  const r=await api('/reels/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify({hook:$('#hook').value,text:$('#text').value,cta:$('#cta').value,date:$('#date').value,voiceId:$('#voice').value,clips:chosen})});
+  cur=await r.json();$('#id').disabled=true;reels=await (await api('/reels')).json();drawList();$('#edt').textContent='Reel '+cur.id;return cur;
+}
+$('#save').onclick=e=>busy(e.target,'Enregistrement…',save);
+$('#mkv').onclick=e=>busy(e.target,'Génération de la voix…',async()=>{await save();cur=await (await api('/reels/'+cur.id+'/voice',{method:'POST'})).json();reels=await (await api('/reels')).json();drawList();await media()});
+$('#rnd').onclick=e=>busy(e.target,'Montage en cours, comptez 1 à 2 minutes…',async()=>{await save();cur=await (await api('/reels/'+cur.id+'/render',{method:'POST'})).json();reels=await (await api('/reels')).json();drawList();await media()});
+$('#apr').onclick=e=>busy(e.target,'Validation…',async()=>{cur=await (await api('/reels/'+cur.id+'/approve',{method:'POST',body:JSON.stringify({approved:true})})).json();reels=await (await api('/reels')).json();drawList()});
+$('#up').onchange=async e=>{
+  const fs=[...e.target.files];let n=0;
+  for(const f of fs){
+    $('#upinfo').textContent='Envoi '+(++n)+'/'+fs.length+' : '+f.name;
+    try{await api('/clips/'+encodeURIComponent(f.name),{method:'PUT',body:f})}catch(x){say(x.message,true)}
+  }
+  $('#upinfo').textContent='';e.target.value='';try{await load()}catch(x){say(x.message,true)}
+};
+if(T)load().catch(e=>say(e.message,true));
+</script>
+</body></html>
