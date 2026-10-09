@@ -116,6 +116,28 @@ async function makeVoice(m) {
   return m;
 }
 
+
+// Bibliothèque partagée ElevenLabs : voix françaises filtrées (par défaut homme, âge mûr).
+async function searchSharedVoices(q) {
+  if (!EL_KEY) throw new Error('ELEVENLABS_API_KEY non défini sur le service');
+  const p = new URLSearchParams({ page_size: '30', language: 'fr' });
+  for (const k of ['gender', 'age', 'use_cases', 'search']) if (q.get(k)) p.set(k, q.get(k));
+  const r = await fetch('https://api.elevenlabs.io/v1/shared-voices?' + p.toString(), { headers: { 'xi-api-key': EL_KEY } });
+  if (!r.ok) throw new Error('ElevenLabs bibliothèque : HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  return (j.voices || []).map((v) => ({ owner: v.public_owner_id, id: v.voice_id, name: v.name, gender: v.gender, age: v.age,
+    accent: v.accent, useCase: v.use_case, descriptive: v.descriptive, preview: v.preview_url, description: (v.description || '').slice(0, 200) }));
+}
+async function addSharedVoice(owner, id, name) {
+  if (!EL_KEY) throw new Error('ELEVENLABS_API_KEY non défini sur le service');
+  const r = await fetch(`https://api.elevenlabs.io/v1/voices/add/${encodeURIComponent(owner)}/${encodeURIComponent(id)}`, {
+    method: 'POST', headers: { 'xi-api-key': EL_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ new_name: String(name || 'Viva voix').slice(0, 60) }) });
+  if (!r.ok) throw new Error('ElevenLabs ajout de voix : HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  return { id: j.voice_id || id };
+}
+
 // ---------- sous-titres ----------
 function wrap(s, max) {
   // espaces insécables à la française : la ponctuation haute ne part jamais seule en début de ligne
@@ -330,6 +352,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/api/jobs') return json(res, 200, jobs);
     if (req.method === 'GET' && p === '/api/voices') return json(res, 200, await listVoices());
+    if (req.method === 'GET' && p === '/api/voice-search') return json(res, 200, await searchSharedVoices(url.searchParams));
+    if (req.method === 'POST' && p === '/api/voice-add') {
+      const b = JSON.parse(await readBody(req) || '{}');
+      return json(res, 200, await addSharedVoice(b.owner, b.id, b.name));
+    }
 
     if (req.method === 'GET' && p === '/api/clips') {
       const names = (await fsp.readdir(CLIPS)).filter((n) => safeClipName(n));

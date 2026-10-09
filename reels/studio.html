@@ -48,6 +48,11 @@ video{width:100%;max-width:360px;border-radius:8px;background:#000;display:block
 <label style="display:inline-block;margin-left:10px"><input id="spl" type="checkbox" checked style="width:auto"> Découper automatiquement en plans (pour les longues vidéos de footage)</label><div id="upinfo" class="mut"></div>
 <div id="clips" class="grid" style="margin-top:12px"></div></section>
 
+<section><h2>Choisir une voix française</h2>
+<div class="row"><div><label>Genre</label><select id="vg"><option value="male">Homme</option><option value="female">Femme</option><option value="">Indifférent</option></select></div>
+<div><label>Âge</label><select id="va"><option value="middle_aged">Mûr</option><option value="old">Âgé</option><option value="">Indifférent</option></select></div>
+<div><label>Usage</label><select id="vu"><option value="narrative_story">Narration</option><option value="informative_educational">Informatif</option><option value="">Indifférent</option></select></div></div>
+<button id="vs" class="ghost">Chercher</button><div id="vres"></div></section>
 <section><h2>Reels</h2><div id="list"></div><button id="new" class="ghost">Nouveau reel</button></section>
 
 <section id="ed" style="display:none"><h2 id="edt">Reel</h2>
@@ -149,6 +154,20 @@ $('#up').onchange=async e=>{
   }catch(x){say(x.message,true)}
   $('#upinfo').textContent='';try{await load()}catch(x){say(x.message,true)}
 };
+
+$('#vs').onclick=e=>busy(e.target,'Recherche des voix…',async()=>{
+  const q=new URLSearchParams();if($('#vg').value)q.set('gender',$('#vg').value);if($('#va').value)q.set('age',$('#va').value);if($('#vu').value)q.set('use_cases',$('#vu').value);
+  const v=await (await api('/voice-search?'+q)).json();const box=$('#vres');box.innerHTML=v.length?'':'<p class="mut">Aucune voix trouvée avec ces critères.</p>';
+  for(const x of v){const d=document.createElement('div');d.className='reel';
+    d.innerHTML='<span><b></b><br><span class="mut"></span></span><span></span>';
+    d.querySelector('b').textContent=x.name;d.querySelector('.mut').textContent=[x.gender,x.age,x.accent,x.useCase,x.descriptive].filter(Boolean).join(' · ');
+    const right=d.lastChild;
+    if(x.preview){const a=document.createElement('audio');a.controls=true;a.preload='none';a.src=x.preview;a.style.width='220px';right.appendChild(a)}
+    const b=document.createElement('button');b.textContent='Utiliser';b.onclick=()=>busy(b,'Ajout de la voix à votre compte…',async()=>{
+      const r=await (await api('/voice-add',{method:'POST',body:JSON.stringify({owner:x.owner,id:x.id,name:'Viva '+x.name})})).json();
+      const s=$('#voice');const o=document.createElement('option');o.value=r.id;o.textContent='Viva '+x.name;s.appendChild(o);s.value=r.id;say('Voix ajoutée et sélectionnée pour le reel ouvert : '+x.name)});
+    right.appendChild(b);box.appendChild(d)}
+});
 if(T)load().catch(e=>say(e.message,true));
 </script>
 </body></html>
