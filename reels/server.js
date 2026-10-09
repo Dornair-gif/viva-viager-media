@@ -118,7 +118,9 @@ async function makeVoice(m) {
 
 // ---------- sous-titres ----------
 function wrap(s, max) {
-  const words = s.split(/\s+/).filter(Boolean); const lines = []; let cur = '';
+  // espaces insécables à la française : la ponctuation haute ne part jamais seule en début de ligne
+  const fr = s.replace(/ ([:;?!»])/g, '\u00a0$1').replace(/« /g, '«\u00a0');
+  const words = fr.split(/ +/).filter(Boolean); const lines = []; let cur = '';
   for (const w of words) {
     if ((cur + ' ' + w).trim().length > max && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim();
   }
@@ -223,12 +225,17 @@ async function render(m) {
   let al = null;
   try { al = JSON.parse(await fsp.readFile(path.join(dir, 'align.json'), 'utf8')); } catch { /* repli proportionnel */ }
   const chunks = chunkWords(wordsFromAlignment(al, m.text, dur));
-  const filters = ['drawbox=x=0:y=1080:w=1080:h=840:color=black@0.35:t=fill'];
+  // dégradé sombre progressif sous les sous-titres (bandes successives, sans arête visible)
+  const filters = [];
+  for (let b = 0; b < 12; b++) {
+    const y = 960 + b * 80;
+    filters.push(`drawbox=x=0:y=${y}:w=1080:h=80:color=black@${(0.04 + b * 0.035).toFixed(3)}:t=fill`);
+  }
   if (m.hook && m.hook.trim()) {
     filters.push(...await textLines(tmp, wrap(m.hook.trim(), 20), { size: 78, y: 250, lh: 110, box: `${RED}@0.92`, pad: 26, enable: 'between(t,0,4)' }));
   }
   for (const c of chunks) {
-    const en = `between(t,${c.s.toFixed(2)},${c.e.toFixed(2)})`;
+    const en = `gte(t,${c.s.toFixed(3)})*lt(t,${c.e.toFixed(3)})`;
     filters.push(...await textLines(tmp, wrap(c.text, 22).slice(0, 3), { size: 66, y: 1240, lh: 84, enable: en }));
   }
   await fsp.writeFile(path.join(tmp, 'overlay.txt'), filters.join(',\n'));
