@@ -47,6 +47,20 @@ function safeClipName(s) {
   return /\.(mp4|mov|m4v|webm)$/i.test(base) && base.length < 120 ? base : null;
 }
 const jobs = {};
+// Tickets de dépôt : créés par une session authentifiée, valables 30 min, limités au dépôt de clips.
+const tickets = new Map();
+function newTicket() {
+  const t = crypto.randomBytes(24).toString('hex');
+  tickets.set(t, Date.now() + 30 * 60 * 1000);
+  return t;
+}
+function ticketOk(req) {
+  const t = String(req.headers['x-upload-ticket'] || '');
+  const exp = tickets.get(t);
+  if (!exp) return false;
+  if (Date.now() > exp) { tickets.delete(t); return false; }
+  return true;
+}
 let chain = Promise.resolve();
 const serial = (fn) => { const p = chain.then(() => fn()); chain = p.catch(() => {}); return p; };
 
@@ -345,7 +359,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (!p.startsWith('/api/')) return json(res, 404, { error: 'introuvable' });
     if (!TOKEN) return json(res, 503, { error: 'ADMIN_TOKEN non défini sur le service' });
-    if (!authed(req)) return json(res, 401, { error: 'jeton invalide' });
+    const clipPut = req.method === 'PUT' && /^\/api\/clips\/[^/]+$/.test(p);
+    if (!authed(req) && !(clipPut && ticketOk(req))) return json(res, 401, { error: 'jeton invalide' });
+    if (req.method === 'POST' && p === '/api/upload-ticket') return json(res, 200, { ticket: newTicket(), validMinutes: 30 });
 
     if (req.method === 'GET' && p === '/api/status') {
       return json(res, 200, { elevenlabsKey: !!EL_KEY, defaultVoice: EL_VOICE || null });
